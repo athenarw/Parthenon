@@ -1,0 +1,10 @@
+[project]
+name = "parthenon"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "build123d>=0.10.0",
+    "cadquery>=2.7.0",
+    "ocp-vscode>=3.4.0",
+    "ruff>=0.15.15",
+]
