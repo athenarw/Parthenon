@@ -3,8 +3,12 @@ name = "parthenon"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
+    "bd-warehouse",
     "build123d>=0.10.0",
     "cadquery>=2.7.0",
     "ocp-vscode>=3.4.0",
     "ruff>=0.15.15",
 ]
+
+[tool.uv.sources]
+bd-warehouse = { git = "https://github.com/gumyr/bd_warehouse", rev = "v0.2.0" }
