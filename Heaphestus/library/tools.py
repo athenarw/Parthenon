@@ -1,3 +1,4 @@
+from build123d import Cylinder
 from build123d import *
 from ocp_vscode import *
 import cadquery as cq
@@ -98,113 +99,161 @@ def loftMe(x,y,z=None):
 
 # need to make this rotatable with our metaphorical theta quantity for arbor rotation
 # Function for building positional arms
-def armConstructor(i,x,z): # i = nub index, x = nub, z = shaft upper boundary plane
+# This function currently is set up to only really produce arms for 4 sites at a time.
+# in the event we want variable site populations, we might want to rework some of this.  
+def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15,cylinderInnermostRadius=13.75,diagnosticMode=0,largeDiagnosticTime=0.5,smallDiagnosticTime=0.1): # i = nub index, x = nub, z = shaft upper boundary plane, cylinderRadius is the OD of the basis cylinder for this chamber
 
+    
 
     # Universal internal properties
-    cylinderAttachmentPointZDisplacement = 2.5
-    cylinderAttachmentPointYThickness = 3.0
-    armXThickness = 2.5
+    cylinderAttachmentPointZDisplacement = 2.5 # the distance "down" in Z from the top of the cylinder to the top of the arm
+    cylinderAttachmentPointYThickness = 3.0 # Arm thickness in Y
+    armXThickness = 2.5 # Arm thickness in X
 
+    mpx = 1 # This is a static stopgap; these can be scaled the same way the start coordinates are being scaled
     # Outside arms 
     if i == 0 or i == 3:
-        cylinderAttachmentPointXDisplacement = 13
-        cylinderAttachmentPointArmLength = 4
+        cylinderAttachmentPointXDisplacement = 13 # Closer to x = 0 than the middle arms.
+        cylinderAttachmentPointArmLength = (cylinderOuterRadius - cylinderInnermostRadius + 0.8)*mpx # length of initial horizontal portion of the arm
 
-    # Middle arms
+    # Middle arms 
     if i == 1 or i == 2:
-        cylinderAttachmentPointXDisplacement = 14
-        cylinderAttachmentPointArmLength = 2
-
+        cylinderAttachmentPointXDisplacement = 14 # further from x = 0 than the outside arms
+        cylinderAttachmentPointArmLength = (cylinderOuterRadius - cylinderInnermostRadius + 0.8)*mpx # This is the length of the initial horizontal portion of the arm
+    """+ 1.06"""
     # Vectors
-    armDuplicatorVector = (0,0,1)
-    armDuplicatorAngle = 180
+    armDuplicatorVector = (0,0,1) # this just rotates around the z axis
+    armDuplicatorAngle = 180 # By 180 degrees. It's for mirroring the arms we build. 
 
-    outerRectangleWidth = cylinderAttachmentPointArmLength + armXThickness
+    # each arm is one outer rectangle with an inner rectangle subtracted from it.
+    # This is the outer rectangle math. Width is in the x direction, Height is in the Z direction. 
+    outerRectangleWidth = cylinderAttachmentPointArmLength + armXThickness #
     outerRectangleHeight = 0 - z.origin.Z - cylinderAttachmentPointZDisplacement + 2.5
 
+    # Inner rectangle, will be subtracted from the outer rectangle
     innerRectangleWidth = outerRectangleWidth - armXThickness
     innerRectangleHeight = outerRectangleHeight - cylinderAttachmentPointZDisplacement
 
+    # This is a small rectangle appended to the side of the outer rectangle which homes the loft. It is NOT a cube. :)
     homingCubeHeight = 2.5
-    homingCubeWidth = 0.1
+    homingCubeWidth = 0.6
     homingCubeDepth = 3.0
 
-    outerRectangleTranslationVector = (-cylinderAttachmentPointXDisplacement + outerRectangleWidth/2, z.origin.Y + cylinderAttachmentPointYThickness/2, -cylinderAttachmentPointZDisplacement - outerRectangleHeight/2)
-    innerRectangleTranslationVector = (-cylinderAttachmentPointXDisplacement + innerRectangleWidth/2, z.origin.Y + cylinderAttachmentPointYThickness/2,  -cylinderAttachmentPointZDisplacement - innerRectangleHeight/2 - (outerRectangleHeight - innerRectangleHeight))
-    homingCubeTranslationVector = (-cylinderAttachmentPointXDisplacement + homingCubeWidth/2 + outerRectangleWidth, z.origin.Y + homingCubeDepth/2,  -cylinderAttachmentPointZDisplacement - homingCubeHeight/2 - (outerRectangleHeight - homingCubeHeight))
+    shaftandnubhalved = 5.36/2
 
-    # nested arm generator for generating the arms
-    outerCube = moveMe(generateCube(outerRectangleWidth,cylinderAttachmentPointYThickness,outerRectangleHeight),outerRectangleTranslationVector)
-    innerCube = moveMe(generateCube(innerRectangleWidth,cylinderAttachmentPointYThickness,innerRectangleHeight),innerRectangleTranslationVector)
-    homingCube = moveMe(generateCube(homingCubeWidth,homingCubeDepth,homingCubeHeight),homingCubeTranslationVector)
 
-    # Lofts
-    loft1 = loftMe(x, homingCube, 0)
+    # we need some circle math to properly home the arms
+    # The below pulls the OD of the basisCylinder and the site Y coordinate. 
+    # Then it homes the x coordinate to the maximum available starting value on the circle, 
+    # With an offset to accomodate the thickness of the actual arm itself. 
+    # Okay before this leaves my short term memory let's talk about this. 
+    # you have a point p somewhere on a circle of r. you have p.Y and p.X. 
+    # You want the two points inscribed by the circle at p.Y., relative to p.
+    # These are going to be: [(r^2 - p.Y^2)^(1/2) + p.X, p.Y] and [(r^2 - p.Y^2)^(1/2) - p.X, p.Y]
+    # Use the first for the primary arm and the second for the mirror arm.
+    if z.origin.Y < 0:
+        yThickness = -1 * cylinderAttachmentPointYThickness
+    elif z.origin.Y == 0:
+        yThickness = 0
+    elif z.origin.Y > 0:
+        yThickness = cylinderAttachmentPointYThickness
 
-    """
-    with BuildPart() as rectangle:
-        with BuildSketch(Plane.XZ) as sketch:
-            sketch = Rectangle(outerRectangleWidth,outerRectangleHeight)
-        extrude(amount = cylinderAttachmentPointYThickness)
-        outerRectangle = rectangle.part.translate(outerRectangleTranslationVector)
-        """
-    """
-    with BuildPart() as rectangle:
-        with BuildSketch(Plane.XZ) as sketch:
-            sketch = Rectangle(innerRectangleWidth,innerRectangleHeight)
-        extrude(amount = cylinderAttachmentPointYThickness)
-        innerRectangle = rectangle.part.translate(innerRectangleTranslationVector)
-    """
-    
 
     
-    homingRectangle = []
+    armXStartCoordinate = math.sqrt(cylinderOuterRadius**2 - (z.origin.Y + yThickness)**2); """+ armXThickness/2"""
+    """
+    armXStartCoordinatePart2 = z.origin.X
+    if armXStartCoordinatePart1 > armXStartCoordinatePart2:
+        armXStartCoordinate = armXStartCoordinatePart1
+    else:
+        armXStartCoordinate = armXStartCoordinatePart2
+    """
+    
+    armXMirrorCoordinate = armXStartCoordinate
+    """math.sqrt(cylinderOuterRadius**2 - (z.origin.Y + yThickness)**2)  - z.origin.X - shaftandnubhalved"""
+
+    print(armXStartCoordinate)
+    print(armXMirrorCoordinate)
+
+
+    # Here we are building vectors to move our rectangle primitives around. 
+    outerRectangleTranslationVector = (-armXStartCoordinate + outerRectangleWidth/2, z.origin.Y + cylinderAttachmentPointYThickness/2, -cylinderAttachmentPointZDisplacement - outerRectangleHeight/2)
+    innerRectangleTranslationVector = (-armXStartCoordinate + innerRectangleWidth/2, z.origin.Y + cylinderAttachmentPointYThickness/2,  -cylinderAttachmentPointZDisplacement - innerRectangleHeight/2 - (outerRectangleHeight - innerRectangleHeight))
+    homingCubeTranslationVector = (-armXStartCoordinate + homingCubeWidth/2 + outerRectangleWidth, z.origin.Y + homingCubeDepth/2,  -cylinderAttachmentPointZDisplacement - homingCubeHeight/2 - (outerRectangleHeight - homingCubeHeight))
+    mirrorFlipVector = (armXStartCoordinate - outerRectangleWidth/2, 0, 0)
+
+    # Generating arm components
+    outerCubeUnmoved = generateCube(outerRectangleWidth,cylinderAttachmentPointYThickness,outerRectangleHeight)
+    innerCubeUnmoved = generateCube(innerRectangleWidth,cylinderAttachmentPointYThickness,innerRectangleHeight)
+    homingCubeUnmoved = generateCube(homingCubeWidth,homingCubeDepth,homingCubeHeight)
+
+    # translating the arm components 
+    outerCube = moveMe(outerCubeUnmoved, outerRectangleTranslationVector)
+    innerCube = moveMe(innerCubeUnmoved,innerRectangleTranslationVector)
+    homingCube = moveMe(homingCubeUnmoved, homingCubeTranslationVector)
+
+    mirrorIterator = 0
 
     # Constructing final part
-    with BuildPart() as arm1:
+    with BuildPart() as arm1InProgress:
         add(outerCube)
         add(homingCube)
         add(innerCube, mode=Mode.SUBTRACT)
-        add(loft1)
 
+    # Now we fillet, we've made the homingCube longer so we can do this step more easily. 
     # fillet-ing final part for those bits which may be filleted internally
-    input = arm1
-    armTest = arm1
-
-
-    
+    input = arm1InProgress
+    armTest = arm1InProgress
     xEdges = [1,2,2,1]
     zEdges = [0,1,3,2]
-    rads = [4,2,2,1]
-    for b, x in enumerate(xEdges):
-        input = filletMe(input,x,zEdges[b],rads[b])
-    """
-    # The below is sloppy and will eventually be a function on a day when I feel like cleaning up this code
-    # Note: this is now a function 8/12/26
-    xNormalFaces, zNormalFaces = obtainFaces(input)
-    sharedEdges1 = xNormalFaces[1].edges() & zNormalFaces[0].edges()
-    inputChamfered1 = fillet(sharedEdges1, radius = 4)
+    rads: list = [2.5,0.5,0.5,0.5]
+    for b, edge in enumerate(xEdges):
+        input = filletMe(input,edge,zEdges[b],rads[b])
 
-    xNormalFaces, zNormalFaces = obtainFaces(inputChamfered1)
-    sharedEdges2 = xNormalFaces[2].edges() & zNormalFaces[1].edges()
-    inputChamfered2 = fillet(sharedEdges2, radius = 2)
+    # Lofts - this is lofting the homing rectangle to a nub. 
+    loft1 = loftMe(x, homingCube, 0) 
+    homingRectangle = []
 
-    xNormalFaces, zNormalFaces = obtainFaces(inputChamfered2)
-    sharedEdges3 = xNormalFaces[2].edges() & zNormalFaces[3].edges()
-    inputChamfered3 = fillet(sharedEdges3, radius = 2)
+    with BuildPart() as arm1:
+        add(input)
+        add(loft1)
 
-    xNormalFaces, zNormalFaces = obtainFaces(inputChamfered3)
-    sharedEdges4 = xNormalFaces[1].edges() & zNormalFaces[2].edges()
-    inputChamfered4 = fillet(sharedEdges4, radius = 1)
-    """
-    arm1 = input
-    
     # arm rotator and duplicator (mirror engine) (Problem: Currently works only for symmetric special solutions. Need to decouple the rotator from the pre-existing translation.)
-    arm2 = arm1.rotate(
-        axis = Axis(z.origin, armDuplicatorVector),
+    mirrorTranslateVector = (armXMirrorCoordinate - outerRectangleWidth/2)
+
+    arm2inProgress = input.translate(
+        mirrorFlipVector).rotate(
+        axis = Axis(Vector(0,z.origin.Y,z.origin.Z), armDuplicatorVector),
                     angle = armDuplicatorAngle
+    ).translate(
+        mirrorTranslateVector
     )
+
+    homingCubeMirror = homingCube.translate(
+        mirrorFlipVector).rotate(
+        axis = Axis(Vector(0,z.origin.Y,z.origin.Z), armDuplicatorVector),
+                    angle = armDuplicatorAngle
+    ).translate(
+        mirrorTranslateVector
+    )
+
+    # Lofts - this is lofting the homing rectangle to a nub. 
+    loft2 = loftMe(mirrorNub, homingCubeMirror, 0) 
+    homingRectangle = []
+
+    # Constructing final part
+    with BuildPart() as arm2:
+        add(arm2inProgress)
+        add(loft2)
+
+    if diagnosticMode == 1:
+        show(homingCubeMirror, arm1)
+        time.sleep(largeDiagnosticTime)
+
+    if diagnosticMode == 1:
+        show(arm2, arm1)
+        time.sleep(largeDiagnosticTime)
+
     return (arm1,arm2,armTest)
 
 def chamberCylinder(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,largeDiagnosticTime=0.5):
@@ -456,6 +505,7 @@ def chamberCylinder(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,larg
     i = 0
     # Pre-fusion chamfers. Use geometry to isolate faces and identify edges as join points between two faces. Merge internal edges this way
     input = preBasisCylinderRotated
+
     # all this will be need to reworked for use with rotational planes and the like. for now it works fine 
     xNormalFaces, zNormalFaces = obtainFaces(input)
     faceList = input.faces()
@@ -467,6 +517,7 @@ def chamberCylinder(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,larg
     vIndicies = [9,6,6,8]
     zIndicies = [0,0,0,0]
     rads = [1,1,6,6]
+
     # Compacted code 
     for i, x in enumerate(zIndicies):
         if i == 2 or i == 3:
