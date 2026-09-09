@@ -170,9 +170,9 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
     
     armXMirrorCoordinate = armXStartCoordinate
     """math.sqrt(cylinderOuterRadius**2 - (z.origin.Y + yThickness)**2)  - z.origin.X - shaftandnubhalved"""
-
-    print(armXStartCoordinate)
-    print(armXMirrorCoordinate)
+    if diagnosticMode == 1:
+        print(armXStartCoordinate)
+        print(armXMirrorCoordinate)
 
 
     # Here we are building vectors to move our rectangle primitives around. 
@@ -499,9 +499,9 @@ def chamberCylinder(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,larg
         for i, x in enumerate(translatedRotatedCubes):
             for j, y in enumerate(clearanceCylinders):
                 overlap = x & y
-                if overlap is not None and overlap.volume > 1e-9:
+                if overlap is not None and overlap.volume > 1e-9 and diagnosticMode == 1:
                     print(f"Cube {i} intersects with Clearance Cylinder {j}.")
-                else:
+                elif diagnosticMode == 1:
                     print(f"Cube {i} does not intersect with Clearance Cylinder {j}.")
 
     # Subtract clearance cylinders from the 45 degree screw hole cubes and combine them into a single part for addition to the basis cylinder.
@@ -592,4 +592,142 @@ def chamberCylinder(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,larg
     return(basisCylinder)
 
 
+# meshPlanes function - input: chamberIdentity, points2D, ZOffset(change this!)
+# this will be an if statement based on a chamber input field. That field will also need
+# to adjust the basis cylinder we generate 
+# Notes for future development:
+# possibility: Using a bounding circle to remove the vertical triangles on the sides of the mesh, in order to reduce triangle count and increase speed - backburnered. use trimesh?
+# Probably need to integrate coordinates from SPOTS somehow. Likely, also need a least-squares fit line for the arbor, and some parameter permutation if we want a normal offset from the arbor line. 
 
+
+def meshPlanes(chamberIdentity, points2D, ZOffset = 2, shaftDiameter = 3.85, shaftHeight = 4, 
+               diagnosticMode = 2, largeDiagnosticTime = 0.5, smallDiagnosticTime = 0.1): 
+    # Importing reference chamber mesh - Goliath Posterior V3 starting V3:
+    if chamberIdentity == "GoliathPosterior":
+        meshName = "chamberMoldMeshGoliathPosteriorV3.stl"
+    else:
+        print("ERROR: INCOMPATIBLE CHAMBER IDENTITY. PLEASE REFACTOR INPUT.")
+
+    # meshName is going to be input from either a user field or from a chamber object which is input from a user field. either way this is close to the origin of the object, so it is upstream of lots of things. 
+    chamberMoldCachePath = Path(meshName).with_suffix(".brep")
+
+    if chamberMoldCachePath.exists():
+        chamberMold = import_brep(chamberMoldCachePath)
+    else:
+        chamberMold = Mesher().read(meshName)[0]
+        export_brep(chamberMold,chamberMoldCachePath)
+
+    # NOTE: MESHES CANNOT BE TRANSLATED. TRANSLATE OTHER OBJECTS AROUND THEM.
+
+    # Displaying the mesh and the cylinder both for diagnostics
+    if diagnosticMode == 1:
+        show_object(chamberMold, name = "chamberMold")
+        print(chamberMoldCachePath)
+        time.sleep(largeDiagnosticTime)
+
+    # Retrieving / generating points for probe penetration:
+    # Initializing parameters
+    meshZ = -5
+    GTShaftID = 0.675
+    recessDiameter = 3.1
+    GTShaftOD = 4
+    points3D = []
+    circularLocations = []
+
+    # Appends a Z value to each of the 2D points
+    for i, x in enumerate(points2D):
+        points3D.append(x + (meshZ,))
+
+    # OD Sketch at the points3D location.
+    for x in points3D:
+        with BuildSketch() as sk:
+                with Locations(x):
+                    Circle(radius = GTShaftOD/2, align=None)
+        circularLocations.append(sk)
+
+    # Diagnostics for previous step
+    if diagnosticMode == 1: 
+        show_object(circularLocations, name = "transient")
+        print(circularLocations)
+        time.sleep(largeDiagnosticTime)
+
+    # Projects circles down onto the mesh surface and adds interfaces onto list
+    projectedCurves = []
+    for x in circularLocations:
+        wire = x.sketch.faces()[0].outer_wire()
+        hits = wire.project_to_shape(chamberMold,direction=(0,0,-1))
+        projectedCurves.append(hits)
+
+    # Diagnostics for previous step
+    if diagnosticMode == 1: 
+        print(projectedCurves)
+        show_object (projectedCurves, name = "transient", update = True)
+        time.sleep(largeDiagnosticTime)
+
+    # Initializes list of faces
+    frameFaces = []
+
+    # Construct faces from center point of each projected curve, using the slope at that location on the chamber mesh.
+    for x in circularLocations:
+        face = x.sketch.faces()[0] 
+        center = face.center() # Finds center point
+        axis = Axis((center.X, center.Y, chamberMold.bounding_box().max.Z), (0,0,-1))
+        point, normal = chamberMold.find_intersection_points(axis)[-1]
+        tiltedPlane = Plane(origin=point, z_dir = normal)
+        frameFaces.append(face.located(Location(tiltedPlane)))
+
+    # Diagnostics for previous step
+    if diagnosticMode == 1: 
+        print(frameFaces)
+        show_object (chamberMold, name = "chamberMold", mode = Render.NONE, update = True)
+        show_object (frameFaces, name = "transient", update = True)
+        time.sleep(largeDiagnosticTime)
+
+
+    # Offsetting the projected curve faces to provide targets for extrusion limits
+    # This allows 2mm of space between the tissue surface and the the bottom of the shafts
+
+    # Initializing parameters offset frame faces
+    offsetFrameFaces = []
+    zPlanarOffset = ZOffset  # Hardlined offset. Currently static, could be good to transform into a variable in the long run.
+
+    # Changing faces to planes, offsetting them 2mm from the mesh surface for gap region
+    for x in frameFaces:
+        plane1 = Plane(x)
+        offsetPlane = Plane(origin = plane1.origin + (0,0,zPlanarOffset), x_dir=plane1.x_dir, z_dir = plane1.z_dir)
+        offsetFrameFaces.append(offsetPlane)
+
+    # Diagnostics for previous step
+    if diagnosticMode == 1: 
+        print(offsetFrameFaces)
+        show_object (offsetFrameFaces, name = "transient", update = True)
+        time.sleep(largeDiagnosticTime)
+
+    # Initializing parameters for bottomSurfaceSolids and startingOffsetPlanes, our outputs for this function
+    startingOffsetPlanes = []
+
+    # Offsets planes by the shaftHeight so we have a starting location for extrusion
+    for x in offsetFrameFaces: # These are actually planes, not faces
+        appendMe = Plane(origin = x.origin + (0,0,shaftHeight), x_dir = (1,0,0), z_dir = (0,0,1))
+        startingOffsetPlanes.append(appendMe)
+
+    # Initializing solids list for export later
+    bottomSurfaceSolids = []
+
+    # Generating solids from bottom surface planes for later use.
+    for x in offsetFrameFaces:
+        with BuildPart() as cyl:
+            with BuildSketch(x):
+                Circle(radius = shaftDiameter)
+            extrude(amount=1)
+        bottomSurfaceSolids.append(cyl.part)
+
+    # Diagnostics for previous steps
+    if diagnosticMode == 1: 
+        print(startingOffsetPlanes,bottomSurfaceSolids)
+        show_object (startingOffsetPlanes, name = "transient", update = True)
+        time.sleep(largeDiagnosticTime)
+        show_object (bottomSurfaceSolids, name = "transient", update = True)
+        time.sleep(largeDiagnosticTime)
+
+    return(points3D, bottomSurfaceSolids, startingOffsetPlanes)
