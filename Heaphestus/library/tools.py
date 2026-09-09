@@ -64,37 +64,28 @@ def findZ(f):
 # x is the y-ward body, y is the -y ward body.
 def loftMe(x,y,z=None):
     if z is None or z == 1:
-        loftRotationVector = (0,0,1)
-        loftRotationAngle = 180
-        target_face1 = min(x.faces(), key=findY)
-        target_face2 = max(y.faces(), key=findY)
-        part = loft([target_face1,target_face2])
-        part_rotated = part.rotate(
-                axis = Axis(part.center(), loftRotationVector),
-                angle = loftRotationAngle
-            )
-    if z == 0: 
-        loftRotationVector = (0,0,1)
-        loftRotationAngle = 180
-        target_face1 = min(x.faces(), key=findX)
-        target_face2 = max(y.faces(), key=findX)
-        part = loft([target_face1,target_face2])
-        part_rotated = part.rotate(
-                axis = Axis(part.center(), loftRotationVector),
-                angle = loftRotationAngle
-            )
+        keyLoft = findY
+    elif z == 0: 
+        keyLoft = findX
     elif z == 2: 
-        loftRotationVector = (0,1,0) # Rotates about y axis
-        loftRotationAngle = 180
-        target_face1 = min(x.faces(), key=findZ)
-        target_face2 = max(y.faces(), key=findZ)
-        part = loft([target_face1,target_face2])
-        part_rotated = part.rotate(
-                axis = Axis(part.center(), loftRotationVector),
-                angle = loftRotationAngle
-            )
+        keyLoft = findZ
 
-    
+    loftRotationVector = (0,0,1)
+    loftRotationAngle = 180
+
+    target_face1 = min(x.faces(), key=keyLoft)
+    target_face2 = max(y.faces(), key=keyLoft)
+
+    wire1 = target_face1.outer_wire()
+    wire2 = Wire(list(reversed([e.reversed() for e in target_face2.outer_wire().edges()])))
+    part_rotated = Part(Compound([Solid.make_loft([wire1,wire2])]).wrapped)
+    """
+    part = loft([target_face1,target_face2])
+    part_rotated = part.rotate(
+            axis = Axis(part.center(), loftRotationVector),
+            angle = loftRotationAngle
+        )
+    """
     return part_rotated
 
 # need to make this rotatable with our metaphorical theta quantity for arbor rotation
@@ -110,6 +101,20 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
     cylinderAttachmentPointYThickness = 3.0 # Arm thickness in Y
     armXThickness = 2.5 # Arm thickness in X
 
+    # this is the if-then that governs the offset we use for the attachment points, so that the furthest-out edge in x determines 
+    # ...the attachment point location, rather than the innermost side. 
+    if z.origin.Y < 0:
+        yThickness = -1 * cylinderAttachmentPointYThickness
+    elif z.origin.Y == 0:
+        yThickness = 0
+    elif z.origin.Y > 0:
+        yThickness = cylinderAttachmentPointYThickness
+
+    # Attachment point mathematics! Thickness of the cylinder at a given point in y is computable as the x value at that y of the inner and outer circles
+    outerRadiusX = math.sqrt(cylinderOuterRadius**2 - (z.origin.Y + yThickness/2)**2)
+    innerRadiusX = math.sqrt(cylinderInnermostRadius**2 - (z.origin.Y + yThickness/2)**2)
+    cylinderAttachmentPointArmLength = outerRadiusX - innerRadiusX + 0.75 # 0.25 is offset for fillets
+    """
     mpx = 1 # This is a static stopgap; these can be scaled the same way the start coordinates are being scaled
     # Outside arms 
     if i == 0 or i == 3:
@@ -120,7 +125,9 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
     if i == 1 or i == 2:
         cylinderAttachmentPointXDisplacement = 14 # further from x = 0 than the outside arms
         cylinderAttachmentPointArmLength = (cylinderOuterRadius - cylinderInnermostRadius + 0.8)*mpx # This is the length of the initial horizontal portion of the arm
-    """+ 1.06"""
+    1.06
+
+    """
     # Vectors
     armDuplicatorVector = (0,0,1) # this just rotates around the z axis
     armDuplicatorAngle = 180 # By 180 degrees. It's for mirroring the arms we build. 
@@ -151,16 +158,8 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
     # You want the two points inscribed by the circle at p.Y., relative to p.
     # These are going to be: [(r^2 - p.Y^2)^(1/2) + p.X, p.Y] and [(r^2 - p.Y^2)^(1/2) - p.X, p.Y]
     # Use the first for the primary arm and the second for the mirror arm.
-    if z.origin.Y < 0:
-        yThickness = -1 * cylinderAttachmentPointYThickness
-    elif z.origin.Y == 0:
-        yThickness = 0
-    elif z.origin.Y > 0:
-        yThickness = cylinderAttachmentPointYThickness
-
-
     
-    armXStartCoordinate = math.sqrt(cylinderOuterRadius**2 - (z.origin.Y + yThickness)**2); """+ armXThickness/2"""
+    armXStartCoordinate = math.sqrt(cylinderOuterRadius**2 - (z.origin.Y + yThickness/2)**2) - 0.15; """+ armXThickness/2"""
     """
     armXStartCoordinatePart2 = z.origin.X
     if armXStartCoordinatePart1 > armXStartCoordinatePart2:
@@ -413,13 +412,23 @@ def chamberCylinder(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,larg
     cubeEdgesForChamfer = newCube.edges().filter_by(GeomType.LINE).filter_by(lambda e: e.center().Z > -.1).filter_by(lambda e: e.center().Y > -.1).filter_by(lambda e: abs(e.position_at(0).Z - e.position_at(1).Z) < 1e-6)
 
     newChamferedCube = chamfer(cubeEdgesForChamfer, length = 3)
+    """
+    secondChamfer = newChamferedCube.edges().filter_by(GeomType.LINE).filter_by(lambda shape: shape.center().Z > -.1).filter_by(lambda shape: abs(shape.length - 3) < 1e-6)
 
+    secondChamferedCube = chamfer(secondChamfer, length = 0.5)
+    """
+    filletedCubeEdges = newChamferedCube.edges().filter_by(GeomType.LINE).filter_by(lambda shape:  shape.center().Z < -1).filter_by(lambda shape: abs(shape.length) > 2)
+
+    if diagnosticMode == 1:
+        show(filletedCubeEdges)
+
+    filletedCube = fillet(filletedCubeEdges, radius = 0.25)
 
     # Translation and rotation vectors
     cubeTranslationVector = (cubeXDisplacement, cubeYDisplacement, cubeZDisplacement)
     cubeRotationVector = (0,0,1)
 
-    newChamferedCubeWithScrewHole = newChamferedCube - threadedInsertRotated
+    newChamferedCubeWithScrewHole = filletedCube - threadedInsertRotated
 
     translatedCube = newChamferedCubeWithScrewHole.translate(cubeTranslationVector)
 
@@ -469,8 +478,6 @@ def chamberCylinder(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,larg
     preBasisCylinderRotated = preBasisCylinder.translate(basisCylinderTranslationVector)
 
     # Flipping clearance cylinders with the same vectors as the basis cylinder, so they can be used to create socket cap clearance holes in the basis cylinder.
-
-
     # Putting them into a list to iterate through, then rotating and translating them to the same position as the basis cylinder.
     clearanceCylinders = []
     clearanceCylinders.append(clearanceCylinder1)
@@ -547,9 +554,30 @@ def chamberCylinder(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,larg
 
     # BasisCylinder merger, we're taking the modified basis cylinder and adding the 45 degree screw holes to it, which have been modified to subtract clearance cylinders if they intersect with them.
 
-    with BuildPart() as basisCylinder:
+    with BuildPart() as basisCylinderPreWork:
         add(basisCylinderModified)
         add(finalScrewHoles)
+
+    #filleting and chamfering some edges
+    filletEdgesBasisCylinderAndFinalScrewHoles = new_edges(
+        finalScrewHoles, 
+        basisCylinderModified, 
+        combined = basisCylinderPreWork.part).filter_by(
+            GeomType.LINE)
+    basisCylinderAlmost = fillet(filletEdgesBasisCylinderAndFinalScrewHoles, radius = 0.25)
+
+    """
+    secondChamfer = newChamferedCube.edges().filter_by(GeomType.LINE).filter_by(lambda shape: shape.center().Z > -.1).filter_by(lambda shape: abs(shape.length - 3) < 1e-6)
+
+    secondChamferedCube = chamfer(secondChamfer, length = 0.5)
+    """
+
+    additionalFilletEdges = basisCylinderAlmost.edges().filter_by(GeomType.CIRCLE).filter_by(lambda shape: abs(shape.radius - chamberRadius3) < 1e-6).filter_by(lambda shape: shape.center().Z > -0.1)
+    moreFilletEdges = basisCylinderAlmost.edges().filter_by(GeomType.LINE).filter_by(lambda shape: shape.center().Z > -.1).filter_by(lambda shape: shape.length > 1.7).filter_by(lambda shape: shape.length < 1.8)
+    filletEdgesODBasisCylinder = additionalFilletEdges + moreFilletEdges
+    if diagnosticMode == 3: 
+        show(filletEdgesODBasisCylinder)
+    basisCylinder = chamfer(filletEdgesODBasisCylinder, length = 0.25)
 
     if diagnosticMode == 1: 
         reset_show()
