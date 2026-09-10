@@ -8,6 +8,9 @@ import sys
 from dataclasses import dataclass, field
 import bd_warehouse.thread, bd_warehouse.fastener 
 from pathlib import Path
+from sympy import false
+from casadi import diag
+from build123d.topology.composite import Part
 
 # Cube generator tool
 def generateCube(x, y, z):
@@ -593,8 +596,7 @@ def chamberCylinder(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,larg
 
 
 # meshPlanes function - input: chamberIdentity, points2D, ZOffset(change this!)
-# this will be an if statement based on a chamber input field. That field will also need
-# to adjust the basis cylinder we generate 
+# this will be an if statement based on a chamber input field. That field will also need to adjust the basis cylinder we generate 
 # Notes for future development:
 # possibility: Using a bounding circle to remove the vertical triangles on the sides of the mesh, in order to reduce triangle count and increase speed - backburnered. use trimesh?
 # Probably need to integrate coordinates from SPOTS somehow. Likely, also need a least-squares fit line for the arbor, and some parameter permutation if we want a normal offset from the arbor line. 
@@ -731,3 +733,149 @@ def meshPlanes(chamberIdentity, points2D, ZOffset = 2, shaftDiameter = 3.85, sha
         time.sleep(largeDiagnosticTime)
 
     return(points3D, bottomSurfaceSolids, startingOffsetPlanes)
+
+
+def siteShaft(startingOffsetPlanes, bottomSurfaceSolids, innerShaftDiameter = 0.675000, shaftDiameter = 4, diagnosticMode = 0, largeDiagnosticTime = 0.5, smallDiagnosticTime = 0.1):
+
+    # Builds circles on the projected curves and constructs shafts
+
+    # Initialize parameters
+    shaftList = []
+    throughHoles = []
+    shaftListWithThroughHoles = []
+    seams = []
+    shaftRadius = shaftDiameter/2
+    innerShaftRadius = innerShaftDiameter/2
+    j = 0
+
+    # Iterate through all the sites and construct initial shaft geometry
+    for i, x in enumerate(startingOffsetPlanes): 
+        # First build the outer shaft
+        with BuildPart() as shaft:
+            with BuildSketch(x) as sk:
+                Circle(radius=shaftRadius)
+            extrude(until=Until.NEXT, target = bottomSurfaceSolids[i], dir=(0,0,-1))
+        shaftList.append(shaft)
+
+        # Next build the throughhole
+        with BuildPart() as throughhole:
+            with BuildSketch(x) as sk:
+                Circle(radius = innerShaftRadius)
+            extrude(until = Until.NEXT, target = bottomSurfaceSolids[i], dir=(0,0,-1))
+        throughHoles.append(throughhole)
+
+        # Now subtract the throughhole geometry from the shaft geometery
+        with BuildPart() as shaftWithThroughHole:
+            add(shaftList[i])
+            add(throughHoles[i], mode = Mode.SUBTRACT)
+        shaftListWithThroughHoles.append(shaftWithThroughHole)
+
+    # Diagnostics for previous step
+    if diagnosticMode == 1: 
+        print(startingOffsetPlanes,bottomSurfaceSolids)
+        show_object (shaftList, name = "shaftList", update = True)
+        time.sleep(largeDiagnosticTime)
+        show_object (throughHoles, name = "transient", update = True, options={"color": (255, 0,0)})
+        time.sleep(largeDiagnosticTime)
+
+    # Initialize parameters and lists for this step
+    targetFaces = []
+    filletItems = []
+    targetEdgesMasterList = []
+
+    # Fillet slanted bottom edge of shaft and throughhole
+    for i, x in enumerate(shaftListWithThroughHoles):
+        targetEdges = [] 
+        targetFace = min(shaftListWithThroughHoles[i].faces(), key = findZ) # Grabs the bottom face in Z
+        targetFaces.append(targetFace) # adds that face to a list
+        targetEdge1, targetEdge2 = targetFace.edges() # This grabs the ID and OD at the bottom face in Z
+        targetEdges.append(targetEdge1) # Appends these to lists
+        targetEdges.append(targetEdge2)
+        filletItem: Sketch | Part | Curve = fillet(targetEdges, radius = 0.20) # fillets at 0.20 mm. Could break code if we change the shaft ID and OD too much.
+        filletItems.append(filletItem)
+        targetEdgesMasterList.append(targetEdges) # Storage list 
+
+    # Saving for easy access in next step  - this references the same list rather than creating a clone, possibly change
+    shaftListWithThroughHolesFilleted = filletItems
+
+    # Diagnostics for previous step
+    if diagnosticMode == 1: 
+        print(targetEdges,shaftListWithThroughHolesFilleted)
+        show_object (targetEdgesMasterList, name = "transient", update = True)
+        time.sleep(largeDiagnosticTime)
+        show_object (shaftList, name = "shaftList", mode = Render.NONE, update = True)
+        show_object (shaftListWithThroughHolesFilleted, name = "transient", update = True)
+        time.sleep(largeDiagnosticTime)
+
+    # Fillet-ing top edge of throughholes:
+
+    # Initialize parameters
+    filletList = []
+
+    # For each shaft, find the edge which corresponds to the ID at the top side of the shaft
+    for i, x in enumerate(shaftListWithThroughHolesFilleted):
+        edge = x.edges().filter_by(GeomType.CIRCLE).filter_by(
+            lambda a: abs(a.radius - innerShaftRadius) < 1e-6)
+        seams.append(edge) # And append this edge to a list of edges
+
+        # Now fillet this edge at 0.25mm, could break code if we mess with OD and ID too much.
+        filletObject = fillet(edge, radius = 0.25)
+        filletList.append(filletObject) # And add to list for storage
+
+    # Diagnostics for previous step
+    if diagnosticMode == 1:
+        show(filletList)
+
+    # Saving for easy access - this references the same list rather than creating a clone, possibly change
+    shaftListWithThroughHolesFilletedTwice = filletList
+
+    # Display everything for the purpose of sanity checks - completed shaft list
+    if diagnosticMode == 1: 
+        show(shaftListWithThroughHolesFilleted)
+
+    return shaftListWithThroughHolesFilletedTwice
+
+# Nubs
+# Doing this a little bit differently from Anna's Onshape. Instead of building in the default plane, I'm going to build each set of nubs on the top plane of the actual shaft it's attached to.
+def nubConstructor(startingOffsetPlanes, diagnosticMode = 0, largeDiagnosticTime = 0.5, smallDiagnosticTime = 0.1):
+
+    # Initializing some parameters - a fair bit of static geometry here, might want to dynamicize at a later date
+    parallelNubSeparation = 2.64575
+    nubLongSide = 3
+    nubShortSide = 1.35425
+    nubDepth = 2.5
+    nubsList = []
+    rotatorLocations = [1,2,3,4]
+    rotatorAngle = 90
+    nubTemplates = []
+    nubTemplatesFlattened = []
+    nubDisplacementVector = (0,parallelNubSeparation/2 + nubShortSide/2,0)
+    nubRotationVector = (0,0,1)
+
+    # Iterate through starting planes, generating four nubs per plane and rotating them to be at right angles, surrounding their shaft.
+    for i, x in enumerate(startingOffsetPlanes):
+        for k, j in enumerate(rotatorLocations):
+            # Generate nub at origin, then move
+            nubTemplate = Rectangle(nubLongSide,nubShortSide).located(Location(startingOffsetPlanes[i])).translate(nubDisplacementVector).rotate(
+                axis = Axis(startingOffsetPlanes[i].origin, nubRotationVector),
+                angle = rotatorAngle*k
+            )
+            nubTemplates.append(nubTemplate)
+
+            # Build the nub and append it to storage list
+            with BuildPart() as nubs:
+                extrude(nubTemplate, amount=nubDepth, dir = (0,0,-1))
+            nubsList.append(nubs.part)
+
+    # Flattens nubs to xy plane - feeds into loftConstructor function later and is used to join nubts together
+    for i, x in enumerate(nubTemplates):
+        nubTemplatesFlattened.append(flattenToXY(nubTemplates[i]))
+
+    # Diagnostics for previous step
+    if diagnosticMode == 1:
+        show(nubsList)
+
+    # Outputs
+    return(nubsList, nubTemplatesFlattened)
+
+
