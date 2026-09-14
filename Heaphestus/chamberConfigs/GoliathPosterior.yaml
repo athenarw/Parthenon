@@ -1,0 +1,31 @@
+# Chamber configs for Goliath Posterior Chamber
+
+meshName: "chamberMoldMeshGoliathPosteriorV3.stl"
+
+# Parameters for cylindrical shapes for the basis cylidner
+chamberRadius1: 13.75  # 27.5/2
+chamberRadius2: 15.0  # 30.150/2 - 0.025 - 0.05 — 0.025mm thicken step in arbor npx backbone. built in here to the radius
+chamberRadius3: 18.0  # 36/2
+chamberGripOuterHeight: 10
+chamberGripInnerHeight: 5
+
+# Cutaway triangle parameters
+cutTrianglePrimaryAngle: 123.547500 # This is the cutout angle in the basis cylinder
+cutTriangleSecondaryAngle: 88.546500 # This is the cutout angle relative to the topmost throughhole axis
+cutTriangleHeight: 4
+triangleAngle: 123
+triangleThickness: 4
+vertices1: [0, 0, 0]
+
+# Throughhole parameters
+throughHoleAngle: 90.0 # This is the angle between the throughholes
+throughHoleRadius: 1.63  # 3.2600/2 — This is toleranced for a 4-40 screw. Note: This needs to be used for Goliath Posterior
+throughHoleRadius2_56: 1.25  # 2.500/2 — This is toleranced for a 2-56 screw. Note: This is for both of Malachi's chambers, and for Goliath Anterior.
+clearanceRadius: 2.5 # This is to allow for socket caps to clear the 45 degree bits on the sides of the basis cylinder.
+
+# Directional indicator triangle parameters
+indicatorTriangleSideLength: 3.46410
+indicatorTriangleInternalAngles: 60.0  # 180/3
+indicatorOffset: 1.5  # 3.0 / 2
+indicatorHorizontalDisplacement: 14.50000
+indicatorTriangleThickness: 0.50000

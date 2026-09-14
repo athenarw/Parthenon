@@ -11,6 +11,7 @@ from pathlib import Path
 from sympy import false
 from casadi import diag
 from build123d.topology.composite import Part
+import yaml
 
 # Cube generator tool
 def generateCube(x, y, z):
@@ -282,38 +283,47 @@ def chamberCylinder(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,larg
 
     # This is a function which builds our basisCylinder. 
     # To start with, we need a chamberIdentity to know the parameters of the basisCylinder we are going to build.
-    if chamberIdentity == "GoliathPosterior":
-        # Parameters for cylindrical shapes for the basis cylidner
-        chamberRadius1=27.5/2 
-        chamberRadius2=30.150/2 - 0.025  - 0.05 #0.025mm thicken step in arbor npx backbone. built in here to the radius
-        chamberRadius3=36/2
-        chamberGripOuterHeight=10
-        chamberGripInnerHeight=5
+    # Then we load our config file for that chamber and resolve it into a dataclass.
+    configPath = Path(__file__).parent.parent / "chamberConfigs" / f"{chamberIdentity}.yaml"
+    if not configPath.exists():
+        raise ValueError(f"No config found for this chamber identity: '{chamberIdentity}.'")
 
-        # Cutaway triangle parameters
-        cutTrianglePrimaryAngle=123.547500 # This is the cutout angle in the basis cylinder
-        cutTriangleSecondaryAngle=88.546500 # This is the cutout angle relative to the topmost throughhole axis
-        cutTriangleHeight=4
-        triangleAngle = 123
-        triangleThickness = 4
-        vertices1 = (0,0,0)
-        vertices2 = (-2*chamberRadius3,0,0)
-        vertices3 = (-3*chamberRadius3*(math.cos(math.radians(triangleAngle))), -3*chamberRadius3*(math.sin(math.radians(triangleAngle))),0)
+    with open(configPath) as f:
+        config = yaml.safe_load(f)
 
-        # Throughhole parameters
-        throughHoleAngle=90.0 # This is the angle between the throughholes
-        throughHoleRadius=3.2600/2 # This is toleranced for a 4-40 screw. Note: This needs to be used for Goliath Posterior
-        ThroughHoleRadius2_56=2.500/2 # This is toleranced for a 2-56 screw. Note: This is for both of Malachi's chambers, and for Goliath Anterior.
-        clearanceRadius = 2.5 # This is to allow for socket caps to clear the 45 degree bits on the sides of the basis cylinder.
+    # Parameters for cylindrical shapes for the basis cylidner
+    chamberRadius1 = config["chamberRadius1"]
+    chamberRadius2 = config["chamberRadius2"]  # 0.025mm thicken step in arbor npx backbone. built in here to the radius
+    chamberRadius3 = config["chamberRadius3"]
+    chamberGripOuterHeight = config["chamberGripOuterHeight"]
+    chamberGripInnerHeight = config["chamberGripInnerHeight"]
 
-        # Directional indicator triangle parameters
-        indicatorTriangleAngle = -1 * (33.456000 + throughHoleAngle)
-        indicatorTriangleSideLength = 3.46410
-        indicatorTriangleInternalAngles = 180/3
-        indicatorOffset = 3.0 / 2
-        indicatorHorizontalDisplacement = 14.50000
-        indicatorTotalYDisplacement = indicatorHorizontalDisplacement + indicatorOffset + (chamberRadius3 - chamberRadius1)/2
-        indicatorTriangleThickness = 0.50000
+    # Cutaway triangle parameters
+    cutTrianglePrimaryAngle = config["cutTrianglePrimaryAngle"]  # This is the cutout angle in the basis cylinder
+    cutTriangleSecondaryAngle = config["cutTriangleSecondaryAngle"]  # This is the cutout angle relative to the topmost throughhole axis
+    cutTriangleHeight = config["cutTriangleHeight"]
+    triangleAngle = config["triangleAngle"]
+    triangleThickness = config["triangleThickness"]
+    vertices1 = tuple(config["vertices1"])
+
+    # Throughhole parameters
+    throughHoleAngle = config["throughHoleAngle"]  # This is the angle between the throughholes
+    throughHoleRadius = config["throughHoleRadius"]  # This is toleranced for a 4-40 screw. Note: This needs to be used for Goliath Posterior
+    throughHoleRadius2_56 = config["throughHoleRadius2_56"]  # This is toleranced for a 2-56 screw. Note: This is for both of Malachi's chambers, and for Goliath Anterior.
+    clearanceRadius = config["clearanceRadius"]  # This is to allow for socket caps to clear the 45 degree bits on the sides of the basis cylinder.
+
+    # Directional indicator triangle parameters
+    indicatorTriangleSideLength = config["indicatorTriangleSideLength"]
+    indicatorTriangleInternalAngles = config["indicatorTriangleInternalAngles"]
+    indicatorOffset = config["indicatorOffset"]
+    indicatorHorizontalDisplacement = config["indicatorHorizontalDisplacement"]
+    indicatorTriangleThickness = config["indicatorTriangleThickness"]
+
+    # Values calculated from the config values above (not themselves stored in the config)
+    vertices2 = (-2*chamberRadius3, 0, 0)
+    vertices3 = (-3*chamberRadius3*(math.cos(math.radians(triangleAngle))), -3*chamberRadius3*(math.sin(math.radians(triangleAngle))), 0)
+    indicatorTriangleAngle = -1 * (33.456000 + throughHoleAngle)
+    indicatorTotalYDisplacement = indicatorHorizontalDisplacement + indicatorOffset + (chamberRadius3 - chamberRadius1)/2
     
     # elemental shapes of basis cylinder constructed below. 
 
@@ -627,8 +637,11 @@ def meshPlanes(chamberIdentity, points2D, ZOffset = 2, shaftDiameter = 3.85, sha
     else:
         print("ERROR: INCOMPATIBLE CHAMBER IDENTITY. PLEASE REFACTOR INPUT.")
 
+    # Path
+    meshPath = Path(__file__).parent.parent / meshName
+
     # meshName is going to be input from either a user field or from a chamber object which is input from a user field. either way this is close to the origin of the object, so it is upstream of lots of things. 
-    chamberMoldCachePath = Path(meshName).with_suffix(".brep")
+    chamberMoldCachePath = meshPath.with_suffix(".brep")
 
     if chamberMoldCachePath.exists():
         chamberMold = import_brep(chamberMoldCachePath)
@@ -852,7 +865,7 @@ def shaftConstructor(startingOffsetPlanes, bottomSurfaceSolids, innerShaftDiamet
 
     return shaftListWithThroughHolesFilletedTwice
 
-# Nubs
+# Nubs. These are arrayed around the shafts, and provide targeting surfaces for the arms to loft to.
 # Doing this a little bit differently from Anna's Onshape. Instead of building in the default plane, I'm going to build each set of nubs on the top plane of the actual shaft it's attached to.
 def nubConstructor(startingOffsetPlanes, diagnosticMode = 0, largeDiagnosticTime = 0.5, smallDiagnosticTime = 0.1):
 
@@ -884,7 +897,7 @@ def nubConstructor(startingOffsetPlanes, diagnosticMode = 0, largeDiagnosticTime
                 extrude(nubTemplate, amount=nubDepth, dir = (0,0,-1))
             nubsList.append(nubs.part)
 
-    # Flattens nubs to xy plane - feeds into loftConstructor function later and is used to join nubts together
+    # Flattens nubs to xy plane - feeds into loftConstructor function later and is used to join nubs together
     for i, x in enumerate(nubTemplates):
         nubTemplatesFlattened.append(flattenToXY(nubTemplates[i]))
 
@@ -1203,13 +1216,13 @@ def guideTubeFrameConstructor(sites, basisCylinder, nubsList, prunedParts, lofts
     return(finalPart)
 
 # Joining file names together and saving file
-def saveMe(points2D,startTime,guideTubeFrame,saveyn,fileName, diagnosticMode = 0, largeDiagnosticTime = 0.5, smallDiagnosticTime = 0.1):
+def saveMe(points2D,startTime,guideTubeFrame,saveyn,fileName, chamberIdentity,diagnosticMode = 0, largeDiagnosticTime = 0.5, smallDiagnosticTime = 0.1):
 
     # First I'm joining the coordinate names together for a uniquely identifiable string
     prefix = "-".join(str(p) for p in points2D)
 
     # Then we join that string together with the user-inputted file name, and give it an stl suffix
-    joinMe = [prefix, fileName]
+    joinMe = [chamberIdentity, prefix, fileName]
     fileNameReal = "-".join(joinMe)
     fileNameActual = Path(fileNameReal + ".stl")
 
