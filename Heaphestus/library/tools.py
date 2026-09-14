@@ -97,12 +97,20 @@ def loftMe(x,y,z=None):
 # in the event we want variable site populations, we might want to rework some of this.  
 def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15,cylinderInnermostRadius=13.75,diagnosticMode=0,largeDiagnosticTime=0.5,smallDiagnosticTime=0.1): # i = nub index, x = nub, z = shaft upper boundary plane, cylinderRadius is the OD of the basis cylinder for this chamber
 
-    
-
     # Universal internal properties
+    armClearance = (9.76 + 2) / 2 # This is the distance an arm needs from the its site.plane.origin.X in x in order for the arm to be acceptably placed
     cylinderAttachmentPointZDisplacement = 2.5 # the distance "down" in Z from the top of the cylinder to the top of the arm
-    cylinderAttachmentPointYThickness = 3.0 # Arm thickness in Y
-    armXThickness = 2.5 # Arm thickness in X
+    cylinderAttachmentPointYThickness = 2.0 # Arm thickness in Y
+    armXThickness = 2.0 # Arm thickness in X
+
+    # This is a small rectangle appended to the side of the outer rectangle which homes the loft. It is NOT a cube. :)
+    homingCubeHeight = 2.5 # Presently set equal to the nub height
+    homingCubeWidth = 0.6 # Must be greater than the fillet size below
+    homingCubeDepth = cylinderAttachmentPointYThickness 
+
+    # Vectors
+    armDuplicatorVector = (0,0,1) # this just rotates around the z axis
+    armDuplicatorAngle = 180 # By 180 degrees. It's for mirroring the arms we build. 
 
     # this is the if-then that governs the offset we use for the attachment points, so that the furthest-out edge in x determines 
     # ...the attachment point location, rather than the innermost side. 
@@ -116,7 +124,7 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
     # Attachment point mathematics! Thickness of the cylinder at a given point in y is computable as the x value at that y of the inner and outer circles
     outerRadiusX = math.sqrt(cylinderOuterRadius**2 - (z.origin.Y + yThickness/2)**2)
     innerRadiusX = math.sqrt(cylinderInnermostRadius**2 - (z.origin.Y + yThickness/2)**2)
-    cylinderAttachmentPointArmLength = outerRadiusX - innerRadiusX + 0.75 # 0.25 is offset for fillets
+    cylinderAttachmentPointArmLength = outerRadiusX - innerRadiusX + 0.5 # 0.25 is offset for fillets
     """
     mpx = 1 # This is a static stopgap; these can be scaled the same way the start coordinates are being scaled
     # Outside arms 
@@ -131,9 +139,7 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
     1.06
 
     """
-    # Vectors
-    armDuplicatorVector = (0,0,1) # this just rotates around the z axis
-    armDuplicatorAngle = 180 # By 180 degrees. It's for mirroring the arms we build. 
+
 
     # each arm is one outer rectangle with an inner rectangle subtracted from it.
     # This is the outer rectangle math. Width is in the x direction, Height is in the Z direction. 
@@ -143,14 +149,6 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
     # Inner rectangle, will be subtracted from the outer rectangle
     innerRectangleWidth = outerRectangleWidth - armXThickness
     innerRectangleHeight = outerRectangleHeight - cylinderAttachmentPointZDisplacement
-
-    # This is a small rectangle appended to the side of the outer rectangle which homes the loft. It is NOT a cube. :)
-    homingCubeHeight = 2.5
-    homingCubeWidth = 0.6
-    homingCubeDepth = 3.0
-
-    shaftandnubhalved = 5.36/2
-
 
     # we need some circle math to properly home the arms
     # The below pulls the OD of the basisCylinder and the site Y coordinate. 
@@ -176,7 +174,6 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
     if diagnosticMode == 1:
         print(armXStartCoordinate)
         print(armXMirrorCoordinate)
-
 
     # Here we are building vectors to move our rectangle primitives around. 
     outerRectangleTranslationVector = (-armXStartCoordinate + outerRectangleWidth/2, z.origin.Y + cylinderAttachmentPointYThickness/2, -cylinderAttachmentPointZDisplacement - outerRectangleHeight/2)
@@ -205,6 +202,7 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
     # Now we fillet, we've made the homingCube longer so we can do this step more easily. 
     # fillet-ing final part for those bits which may be filleted internally
     input = arm1InProgress
+    inputStored = input
     armTest = arm1InProgress
     xEdges = [1,2,2,1]
     zEdges = [0,1,3,2]
@@ -212,15 +210,25 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
     for b, edge in enumerate(xEdges):
         input = filletMe(input,edge,zEdges[b],rads[b])
 
-    # Lofts - this is lofting the homing rectangle to a nub. 
-    loft1 = loftMe(x, homingCube, 0) 
-    homingRectangle = []
+    coordinateComparator = input
+    # Pull mininum and maximum x values from the arm shape
+    minX = coordinateComparator.bounding_box().min.X
+    maxX = coordinateComparator.bounding_box().max.X
 
-    with BuildPart() as arm1:
-        add(input)
-        add(loft1)
+    # If the x values are too close to the plane origin, they skip adding that arm; this prevents collision with the arbor. 
+    if abs(minX - z.origin.X) < armClearance or abs(maxX - z.origin.X) < armClearance:
+        with BuildPart() as arm1:
+            pass
 
-    # arm rotator and duplicator (mirror engine) (Problem: Currently works only for symmetric special solutions. Need to decouple the rotator from the pre-existing translation.)
+    else:
+        # Lofts - this is lofting the homing rectangle to a nub. 
+        loft1 = loftMe(x, homingCube, 0) 
+        with BuildPart() as arm1:
+            add(input)
+            add(loft1)
+
+
+    # arm rotator and duplicator (mirror engine)
     mirrorTranslateVector = (armXMirrorCoordinate - outerRectangleWidth/2)
 
     arm2inProgress = input.translate(
@@ -239,14 +247,22 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
         mirrorTranslateVector
     )
 
-    # Lofts - this is lofting the homing rectangle to a nub. 
-    loft2 = loftMe(mirrorNub, homingCubeMirror, 0) 
-    homingRectangle = []
+    coordinateComparator2 = arm2inProgress
+    # Pull mininum and maximum x values from the arm shape
+    minX = coordinateComparator2.bounding_box().min.X
+    maxX = coordinateComparator2.bounding_box().max.X
 
-    # Constructing final part
-    with BuildPart() as arm2:
-        add(arm2inProgress)
-        add(loft2)
+    # If the x values are too close to the plane origin, they skip adding that arm; this prevents collision with the arbor. 
+    if abs(minX - z.origin.X) < armClearance or abs(maxX - z.origin.X) < armClearance:
+        with BuildPart() as arm2:
+            pass
+    else: 
+        # Lofts - this is lofting the homing rectangle to a nub. 
+        loft2 = loftMe(mirrorNub, homingCubeMirror, 0) 
+        # Constructing final part
+        with BuildPart() as arm2:
+            add(arm2inProgress)
+            add(loft2)
 
     if diagnosticMode == 1:
         show(homingCubeMirror, arm1)
@@ -424,6 +440,7 @@ def chamberCylinder(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,larg
 
     if diagnosticMode == 1:
         show(filletedCubeEdges)
+        time.sleep(largeDiagnosticTime)
 
     filletedCube = fillet(filletedCubeEdges, radius = 0.25)
 
@@ -578,7 +595,7 @@ def chamberCylinder(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,larg
     additionalFilletEdges = basisCylinderAlmost.edges().filter_by(GeomType.CIRCLE).filter_by(lambda shape: abs(shape.radius - chamberRadius3) < 1e-6).filter_by(lambda shape: shape.center().Z > -0.1)
     moreFilletEdges = basisCylinderAlmost.edges().filter_by(GeomType.LINE).filter_by(lambda shape: shape.center().Z > -.1).filter_by(lambda shape: shape.length > 1.7).filter_by(lambda shape: shape.length < 1.8)
     filletEdgesODBasisCylinder = additionalFilletEdges + moreFilletEdges
-    if diagnosticMode == 3: 
+    if diagnosticMode == 1: 
         show(filletEdgesODBasisCylinder)
     basisCylinder = chamfer(filletEdgesODBasisCylinder, length = 0.25)
 
@@ -735,7 +752,7 @@ def meshPlanes(chamberIdentity, points2D, ZOffset = 2, shaftDiameter = 3.85, sha
     return(points3D, bottomSurfaceSolids, startingOffsetPlanes)
 
 
-def siteShaft(startingOffsetPlanes, bottomSurfaceSolids, innerShaftDiameter = 0.675000, shaftDiameter = 4, diagnosticMode = 0, largeDiagnosticTime = 0.5, smallDiagnosticTime = 0.1):
+def shaftConstructor(startingOffsetPlanes, bottomSurfaceSolids, innerShaftDiameter = 0.675000, shaftDiameter = 4, diagnosticMode = 0, largeDiagnosticTime = 0.5, smallDiagnosticTime = 0.1):
 
     # Builds circles on the projected curves and constructs shafts
 
@@ -878,4 +895,345 @@ def nubConstructor(startingOffsetPlanes, diagnosticMode = 0, largeDiagnosticTime
     # Outputs
     return(nubsList, nubTemplatesFlattened)
 
+# loftConstructor function
+# inputs: nubTemplatesFlattened, nubsList
+def loftConstructor(nubsList, nubTemplatesFlattened, startingOffsetPlanes, diagnosticMode = 0, largeDiagnosticTime = 0.5, smallDiagnosticTime = 0.1):
+
+    overlaps = []
+
+    # Overlap areas between nubs 2,4
+    overlaps.append(nubTemplatesFlattened[2] & nubTemplatesFlattened[4])
+
+    # Overlap areas between nubs 6,8
+    overlaps.append(nubTemplatesFlattened[6] & nubTemplatesFlattened[8])
+
+    # Overlap areas between nubs 8,10
+    overlaps.append(nubTemplatesFlattened[10] & nubTemplatesFlattened[12])
+
+
+    # Constructing overlap solids, pruning union parts between different shafts
+
+    overlapSolids = []
+    prunedParts = []
+    lofts = []
+    arbitraryOverlapHeight = 5
+
+
+
+    # Generating overlap structures
+    for i, x in enumerate(overlaps):
+        with BuildPart() as firstpart:
+            extrude(overlaps[i], amount = arbitraryOverlapHeight*10, dir = (0,0,-1))
+            overlapSolids.append(firstpart.part)
+
+    # Deleting overlap between shafts 1 and 2, numbered from +y to -y in global coordinates
+    with BuildPart() as pt:
+        add (nubsList[2])
+        if overlapSolids[0] is not None:
+            add (overlapSolids[0], mode = Mode.SUBTRACT)
+        prunedParts.append(pt.part)
+
+    with BuildPart() as pt:
+        add (nubsList[4])
+        if overlapSolids[0] is not None:
+            add (overlapSolids[0], mode = Mode.SUBTRACT)
+        prunedParts.append(pt.part)
+
+    loft1 = loftMe(nubsList[2], nubsList[4])
+    lofts.append(loft1)
+
+    # Deleting overlap between shafts 10 and 12, numbered from +y to -y in global coordinates
+    with BuildPart() as pt:
+        add (nubsList[10])
+        if overlapSolids[2] is not None:
+            add (overlapSolids[2], mode = Mode.SUBTRACT)
+            
+        prunedParts.append(pt.part)
+
+    with BuildPart() as pt:
+        add (nubsList[12])
+        if overlapSolids[2] is not None:
+            add (overlapSolids[2], mode = Mode.SUBTRACT)
+        prunedParts.append(pt.part)
+
+    loft2 = loftMe(nubsList[10], nubsList[12])
+    lofts.append(loft2)
+
+    with BuildPart() as pt:
+        if startingOffsetPlanes[1].origin.Z > startingOffsetPlanes[2].origin.Z:
+            add (nubsList[6])
+        elif startingOffsetPlanes[1].origin.Z < startingOffsetPlanes[2].origin.Z:
+            add (nubsList[8])
+        else:
+            add (nubsList[6])
+            add (nubsList[8])
+        if overlapSolids[1] is not None:
+            add(overlapSolids[1], mode=Mode.SUBTRACT)
+
+        prunedParts.append(pt.part)
+        
+    loft3 = loftMe(nubsList[6], nubsList[8])
+
+    if diagnosticMode == 1: 
+        show(prunedParts, colors=["#e8b024", "#e8b024", "#e8b024",  "lightblue"])
+        len(prunedParts)
+        time.sleep(largeDiagnosticTime)
+
+    return(prunedParts, lofts, overlapSolids)
+
+def armStreamConstructor(startingOffsetPlanes,nubsList,handPickedIndicies,diagnosticMode = 0, largeDiagnosticTime = 0.5, smallDiagnosticTime = 0.1):
+    # This is basically a wrapper around armConstructor which applies armConstructer to an entire list.
+
+    # Initializing and resetting lists
+    testArms = []
+    outputArmStream = []
+    refinedNubsList = [nubsList[i] for i in handPickedIndicies]
+    mirrorNubsList = [nubsList[i + 2] for i in handPickedIndicies]
+
+    # Calls armConstructor for each site, although this is before sites are a thing. Perhaps reverse this order?
+    for i, x in enumerate(refinedNubsList):
+        arm1, mirrorArm,armTest = armConstructor(i, refinedNubsList[i],startingOffsetPlanes[i], mirrorNubsList[i], diagnosticMode = diagnosticMode)
+        outputArmStream.append(arm1)
+        outputArmStream.append(mirrorArm)
+        testArms.append(armTest)
+        # Ensure construction sketches are either nub-centric, or somehow related directionally to the rotation of the arbor centerline. 
+
+    # Visual diagnostics for this step
+    if diagnosticMode == 1:
+        show(basisCylinder, shaftListWithThroughHolesFilletedTwice, nubsList, outputArmStream, colors=["#e8b024", "#e8b024", "#e8b024",  "lightblue", "pink", "pink"])
+
+    return(outputArmStream, testArms)
+
+def siteConstructor(Site, startingOffsetPlanes,shaftListWithThroughHolesFilletedTwice,nubsList,prunedParts,outputArmStream,diagnosticMode = 0, largeDiagnosticTime = 0.5, smallDiagnosticTime = 0.1):
+    # Initialize and reset the variables used in this cell
+
+    # Adds the x-axial nubs, the outer union parts, and the shafts to their site. 
+    sites = []
+    for i, plane in enumerate(startingOffsetPlanes):
+        sites.append(Site(
+            shaft = shaftListWithThroughHolesFilletedTwice[i],
+            plane = plane,
+            nubs = nubsList[i*4+1:i*4 + 4:2] + [prunedParts[i]],
+            arms = outputArmStream[i*2:i*2 + 2]
+        )) 
+    return(sites)
+
+
+# Put everything together and construct the final guide tube frame.
+def guideTubeFrameConstructor(sites, basisCylinder, nubsList, prunedParts, lofts, overlapSolids, diagnosticMode = 0, largeDiagnosticTime = 0.5, smallDiagnosticTime = 0.1):
+
+    # Initializing and resetting parameters
+    fillets = []
+    filletedItems = []
+    combinedSitesWithArms = []
+    armFillets = []
+    filletParameter2 = 0
+
+
+
+    # Picks the highest(z) starting offset plane of the two middle planes. 
+    # Adds the central nub of the higher z site and appends to nubs
+    # trims the central nub of the lower z site and appends that to nubs
+    if sites[1].plane.origin.Z < sites[2].plane.origin.Z:
+        sites[1].nubs.append((nubsList[6]))
+        sites[2].nubs.append((prunedParts[-1]))
+        planeHeightIndicator = 2 # this keeps track of the higher plane
+
+    elif sites[1].plane.origin.Z > sites[2].plane.origin.Z:
+        sites[2].nubs.append((nubsList[8]))
+        sites[1].nubs.append((prunedParts[-1]))
+        planeHeightIndicator = 1 # this keeps track of the higher plane
+
+    # covers the case in which the zaxis is the same, in which case we just add both nubs
+    else:
+        sites[1].nubs.append((nubsList[6]))
+        sites[2].nubs.append((nubsList[8]))
+
+    # Visual diagnostics for this step
+    if diagnosticMode == 1 or diagnosticMode == 1: 
+        show(*[site.shaft for site in sites], [site.nubs for site in sites], [site.arms for site in sites], basisCylinder)
+
+
+
+    # Iterate through sites and fuse them with their nubs. Then fillet.
+    for i, site in enumerate(sites): # Iterates
+        with BuildPart() as combinedSite: 
+            # Add sitewise preconstructed parts
+            add(site.shaft)
+            add(site.nubs)
+
+        # Grab edges for filleting
+        filletMe = new_edges(
+            site.shaft, 
+            *site.nubs, 
+            combined = combinedSite.part).filter_by(GeomType.LINE)
+
+        # Add those edges to a list for storage
+        fillets.extend(filletMe)
+
+        # Fillet these, using a structure which adapts to unanticipated changes in radius. If this starts erroring maybe increase max iterations.
+        try:
+            # Find fillet radius for selected edges
+            r = combinedSite.part.max_fillet(filletMe, max_iterations=25)
+            if diagnosticMode == 1:
+                print(f"edge: ok, max radius = {r}")
+            filletParameter = min((r), 0.25)
+
+            # Fillet the thing using the edges found above
+            filletedItem = fillet(filletMe, radius = filletParameter)
+
+        # This will throw an error if the above doesn't work.
+        except Exception as err:
+            if diagnosticMode == 1 or diagnosticMode == 1:
+                print(f"edge: BAD — {type(err).__name__}: {err}")
+
+        # Append these to list for storage
+        filletedItems.append(filletedItem)
+
+    # Diagnostics for this step will show items on ocpviewer and print the length of the list containing successfully merged items. 
+    if diagnosticMode == 1 or diagnosticMode == 1:
+        show(filletedItems)
+        print(len(filletedItems))
+
+
+
+    # Adding arms in a sitewise fashion.
+    # Iterating through sites and adding arms for each of them. 
+    # Will hopefully support any number of sites, but this is untested.
+    for i, site in enumerate(sites): # Iterates
+        with BuildPart() as combinedSiteWithArms:
+            # Adding together previously constructed parts
+            add(filletedItems[i]) # Previous BuildPart() construct
+            add(site.arms) # sitewise arm construction
+
+            combinedSitesWithArms.append(combinedSiteWithArms.part) # Add to a list for storage
+
+    # Diagnostics for visualizing the arms, sites, and basisCylinder in ocpviewer.
+    if diagnosticMode == 1: 
+        show([combinedSitesWithArms for site in sites], basisCylinder)
+
+
+
+    # Adding together the basisCylinder from chamberCylinder and the sitewise arms. 
+    # This combines the basis cylinder constructed with chamberCylinder
+    with BuildPart() as newPart:
+        # Add preconstructed parts first
+        add(basisCylinder) # Add basisCylinder from chamberCylinder function
+        add(combinedSitesWithArms) # Add list of sites with arms
+
+        # Now we grab edges from the combined part
+        armFillet = new_edges(
+            *combinedSitesWithArms,
+            basisCylinder,
+            combined = newPart.part).filter_by(GeomType.LINE).filter_by(lambda e: e.length >= 2.25)
+
+        # Now we fillet those edges. We do so by the min of 0.25mm or the largest radius the smallest intersection can sustain
+        try:
+            r = newPart.part.max_fillet(armFillet, max_iterations=25) # Pulls the largest r that all edges can support
+            if diagnosticMode == 1: # Internal diagnostics
+                print(f"edge: ok, max radius = {r}")
+            filletParameter2 = min((r), 0.25) # Finds min between static and max_fillet dynamic radii
+            newestPart = fillet(armFillet, radius = filletParameter2) # Constructs filleted part
+
+        # if the fillets don't work it will throw this error in diagnostic mode. 
+        except Exception as err:
+            if diagnosticMode == 1:
+                print(f"edge: BAD — {type(err).__name__}: {err}")
+
+    # Diagnostics for the fillets, if they don't work this will display things including the length of armFillet and the visuals in ocpviewer.
+    if diagnosticMode == 1 or diagnosticMode == 1: 
+        armFillet[2].length
+        show(*[armFillets], newestPart)
+        show(basisCylinder, combinedSitesWithArms,armFillet)
+
+
+
+    # Add lofts, construct finalPart, which is what we export into an STL.
+    # Initializing parameters
+    loftFillets = [] # Zeros out the list in case it's being rerun. Also initializes.
+    filletParameter3 = 0 # Zeros out list for rerunning purposes
+
+    # Constructing finalPart
+    with BuildPart() as nextPart:
+        add (newestPart) # This arises from the previously called buildPart function
+        add (lofts[0]) # Lofting between nubs 2 and 4
+        add (lofts[1]) # Lofting between nubs 10 and 12
+        if overlapSolids[1] is None: # This is making sure that there's no overlap; if there is overlap, earlier functionality will apply.
+            add(lofts[2]) # Lofting between central nubs
+
+        # Now that we've added all the solid parts, we're going to grab all the edges we need to fillet from those parts.
+        loftFillet = nextPart.edges().filter_by(
+            GeomType.LINE).filter_by(
+            lambda e: abs(e.length - 3) < 1e-6).filter_by(
+            lambda e: abs(e.position_at(0).Z - e.position_at(1).Z) < 1e-6).filter_by(
+            lambda e: abs(e.position_at(0).Y - e.position_at(1).Y) < 1e-6).filter_by(
+            lambda e: e.center().Z < -1)
+
+        # Then we extend a list of fillets. This is mostly just a storage mechanism so we can access this later if we have to.
+        loftFillets.extend(loftFillet)
+
+        # Now we're going to fillet these parts. We'll use the minimum of either the max_fillet value for the smallest edge or 0.25mm.
+        try:
+            r = nextPart.part.max_fillet(loftFillet, max_iterations=25) # Establishing the radius
+            if diagnosticMode == 1: # Internal diagnostics
+                print(f"edge: ok, max radius = {r}")
+            filletParameter3 = min((r), 0.25) # Finding the min between the static radius and the max radius
+            finalPart = (fillet(loftFillet, radius = filletParameter3)) # Saving the final part. 
+
+        # if that doesn't work, this prints in diagnostic mode.
+        except Exception as err:
+            if diagnosticMode == 1:
+                print(f"edge: BAD — {type(err).__name__}: {err}")
+
+    # This tests whether different edges have the capability to be filleted, and if so, their max radius. It also prints those fillets.
+    if diagnosticMode == 1: 
+        print(loftFillets) # This prints the list.
+
+        # This iterates through the fillets - use this if your fillets are failing, it can tell you which one is not functioning. You might have to paste it into another cell.
+        for i, e in enumerate(loftFillet):
+            try:
+                r = nextPart.part.max_fillet([e])
+                print(i, "ok — max radius:", r)
+            # If the edges don't function this will alert us
+            except Exception as err:
+                print(i, "BAD EDGE:", type(err).__name__, err)
+        print(len(nextPart.part.solids()))
+    if diagnosticMode == 1 or diagnosticMode == 3:
+        show(finalPart)
+    return(finalPart)
+
+# Joining file names together and saving file
+def saveMe(points2D,startTime,guideTubeFrame,saveyn,fileName, diagnosticMode = 0, largeDiagnosticTime = 0.5, smallDiagnosticTime = 0.1):
+
+    # First I'm joining the coordinate names together for a uniquely identifiable string
+    prefix = "-".join(str(p) for p in points2D)
+
+    # Then we join that string together with the user-inputted file name, and give it an stl suffix
+    joinMe = [prefix, fileName]
+    fileNameReal = "-".join(joinMe)
+    fileNameActual = Path(fileNameReal + ".stl")
+
+    # Diagnostics if desired, to ensure file name is correct
+    if diagnosticMode == 1:
+        print(prefix)
+        print(fileNameReal)
+        print(fileNameActual)
+
+    # Time related diagnostics
+    if diagnosticMode == 1 or diagnosticMode == 2: 
+        elapsedTime = time.perf_counter() - startTime
+        print(elapsedTime)
+
+    # as of 9/2/2026:
+    # diagnosticMode = 0 is who knows how long because it doesn't print! 
+    # diagnosticMode = 1 is 61. 1 seconds
+    # diagnosticMode = 2 is 26.3 seconds, 25.5 after activating the diagnostic toggle on all show() commands. 17.3 after refining the filleting to be out of a for loop.
+
+
+    # Saves file with composite file name if saving is turned on
+    if saveyn == 1:
+        export_stl(guideTubeFrame, fileNameActual)
+        print(f"Saved as: {fileNameActual}")
+
+    return(fileNameActual)
 
