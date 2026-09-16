@@ -65,31 +65,34 @@ def findX(f):
 def findZ(f):
     return f.normal_at().Z
 
-# x is the y-ward body, y is the -y ward body.
+# x is the y-max body, y is the y-min body.
 def loftMe(x,y,z=None):
     if z is None or z == 1:
         keyLoft = findY
+        loftRotationVector = (0,1,0)
     elif z == 0: 
         keyLoft = findX
+        loftRotationVector = (1,0,0)
     elif z == 2: 
         keyLoft = findZ
+        loftRotationVector = (0,0,1)
 
-    loftRotationVector = (0,0,1)
     loftRotationAngle = 180
 
-    target_face1 = min(x.faces(), key=keyLoft)
-    target_face2 = max(y.faces(), key=keyLoft)
+    target_face1 = min(x.faces(), key=keyLoft) # Find the min face of the max object
+    target_face2 = max(y.faces(), key=keyLoft) # Find the max face of the min object
 
+    """
     wire1 = target_face1.outer_wire()
     wire2 = Wire(list(reversed([e.reversed() for e in target_face2.outer_wire().edges()])))
-    part_rotated = Part(Compound([Solid.make_loft([wire1,wire2])]).wrapped)
+    part_rotated = Part(Compound([Solid.make_loft([wire1, wire2])]).wrapped)
     """
+
     part = loft([target_face1,target_face2])
     part_rotated = part.rotate(
             axis = Axis(part.center(), loftRotationVector),
             angle = loftRotationAngle
         )
-    """
     return part_rotated
 
 # need to make this rotatable with our metaphorical theta quantity for arbor rotation
@@ -222,6 +225,7 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
             pass
 
     else:
+        # Notably: the unmirrored/original arms are to the LEFT of the origin or towards -x
         # Lofts - this is lofting the homing rectangle to a nub. 
         loft1 = loftMe(x, homingCube, 0) 
         with BuildPart() as arm1:
@@ -259,7 +263,9 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
             pass
     else: 
         # Lofts - this is lofting the homing rectangle to a nub. 
-        loft2 = loftMe(mirrorNub, homingCubeMirror, 0) 
+        # note: Because it's mirrored we're swapping the x and y inputs; nub goes on y now instead of x, and visa versa. 
+        # Notably: the mirrored arms are to the RIGHT of the origin, or in the +x direction from the origin. 
+        loft2 = loftMe(homingCubeMirror, mirrorNub, 0) 
         # Constructing final part
         with BuildPart() as arm2:
             add(arm2inProgress)
@@ -275,7 +281,7 @@ def armConstructor(i,x,z,mirrorNub,cylinderOuterRadius=18,cylinderInnerRadius=15
 
     return (arm1,arm2,armTest)
 
-def chamberCylinder(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,largeDiagnosticTime=0.5):
+def chamberBasisConstructor(chamberIdentity, diagnosticMode,smallDiagnosticTime=0.1,largeDiagnosticTime=0.5):
 
     # Timer for keeping track of how long the basis cyinder takes to make
     startTime = time.perf_counter()
@@ -1171,8 +1177,10 @@ def guideTubeFrameConstructor(sites, basisCylinder, nubsList, prunedParts, lofts
         add (newestPart) # This arises from the previously called buildPart function
         add (lofts[0]) # Lofting between nubs 2 and 4
         add (lofts[1]) # Lofting between nubs 10 and 12
+        """
         if overlapSolids[1] is None: # This is making sure that there's no overlap; if there is overlap, earlier functionality will apply.
             add(lofts[2]) # Lofting between central nubs
+        """
 
         # Now that we've added all the solid parts, we're going to grab all the edges we need to fillet from those parts.
         loftFillet = nextPart.edges().filter_by(
@@ -1211,8 +1219,11 @@ def guideTubeFrameConstructor(sites, basisCylinder, nubsList, prunedParts, lofts
             except Exception as err:
                 print(i, "BAD EDGE:", type(err).__name__, err)
         print(len(nextPart.part.solids()))
+
+    # Visualizes final part at the end of the run
     if diagnosticMode == 1 or diagnosticMode == 3:
         show(finalPart)
+
     return(finalPart)
 
 # Joining file names together and saving file
